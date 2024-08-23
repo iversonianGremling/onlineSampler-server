@@ -3,7 +3,6 @@ const fs = require("fs");
 const path = require("path");
 const multer = require("multer");
 const NodeID3 = require("node-id3"); // For MP3 files
-const { parseFile } = require("music-metadata"); // For reading metadata
 const WavEncoder = require("wav-encoder"); // For encoding WAV files
 
 const router = express.Router();
@@ -47,9 +46,26 @@ router.get("/", (req, res) => {
   });
 });
 
+// Serve audio files
+router.get("/:filename", (req, res) => {
+  const filePath = path.join(audioDirectory, req.params.filename);
+
+  // Check if the file exists
+  fs.access(filePath, fs.constants.F_OK, (err) => {
+    if (err) {
+      return res.status(404).json({ error: "File not found" });
+    }
+
+    // Serve the file
+    res.sendFile(filePath);
+  });
+});
+
 // READ: Get Metadata of an Audio file
 router.get("/:filename/metadata", async (req, res) => {
   const filePath = path.join(audioDirectory, req.params.filename);
+
+  const { parseFile } = await import("music-metadata"); // For reading metadata
   try {
     const metadata = await parseFile(filePath);
 
@@ -98,6 +114,7 @@ router.put("/:filename/metadata", async (req, res) => {
   } else if (extname === ".wav") {
     // Handle WAV metadata
     try {
+      const { parseFile } = await import("music-metadata"); // For reading metadata
       const metadata = await parseFile(filePath);
       // Update the metadata (WAV format)
       metadata.common.title = tags.title || metadata.common.title || "";
