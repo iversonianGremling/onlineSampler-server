@@ -91,6 +91,7 @@ router.get("/", async (req, res) => {
 // Serve audio files
 router.get("/:filename", (req, res) => {
   const filePath = path.join(audioDirectory, req.params.filename);
+  console.log("File being served:", filePath);
 
   // Check if the file exists
   fs.access(filePath, fs.constants.F_OK, (err) => {
