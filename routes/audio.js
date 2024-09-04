@@ -152,6 +152,70 @@ router.get("/:filename/metadata", async (req, res) => {
   }
 });
 
+// GET: Serve audio files to editSample
+router.get("/sampleEdit/:filename", (req, res) => {
+  const filePath = path.join(audioDirectory, req.params.filename);
+  console.log("File being served:", filePath);
+
+  // Check if the file exists
+  fs.access(filePath, fs.constants.F_OK, (err) => {
+    if (err) {
+      return res.status(404).json({ error: "File not found" });
+    }
+
+    // Serve the file
+    res.sendFile(filePath);
+  });
+});
+
+// READ: Get Metadata of an Audio file
+router.get("/:filename/metadata", async (req, res) => {
+  const filePath = path.join(audioDirectory, req.params.filename);
+  const extname = path.extname(filePath).toLowerCase();
+
+  const { parseFile } = await import("music-metadata"); // For reading metadata
+  try {
+    const metadata = await parseFile(filePath);
+
+    // Check if the customTags file exists and if not create it
+    try {
+      await fs.promises.access(`${filePath}${extname}.json`, fs.constants.F_OK);
+    } catch (err) {
+      await fs.promises.writeFile(`${filePath}${extname}.json`, `{"tags": ""}`);
+    }
+
+    // Read customTags file
+    let customTags = [];
+    try {
+      const data = await fs.promises.readFile(
+        `${filePath}${extname}.json`,
+        "utf8"
+      );
+      console.log(`Reading customTags file: ${filePath}${extname}.json`);
+      console.log(`Contents of customTags file: ${JSON.parse(data).tags}`);
+      customTags = JSON.parse(data).tags || [];
+      console.log("Read customTags: ", customTags);
+    } catch (err) {
+      console.error("Error reading customTags file: ", err);
+    }
+
+    // Extract required fields and add custom tags
+    const result = {
+      title: metadata.common.title || "",
+      artist: metadata.common.artist || "",
+      bpm: metadata.common.bpm || "",
+      duration: metadata.format.duration || 0,
+      tags: customTags || [],
+    };
+
+    res.json(result);
+  } catch (err) {
+    res
+      .status(500)
+      .json({ error: "Unable to read metadata", details: err.message });
+  }
+});
+
 // UPDATE: Edit Metadata of an Audio file
 router.put("/:filename/metadata", async (req, res) => {
   const filePath = path.join(audioDirectory, req.params.filename);
