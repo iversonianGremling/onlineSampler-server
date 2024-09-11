@@ -5,6 +5,7 @@ const path = require("path");
 const multer = require("multer");
 const NodeID3 = require("node-id3"); // For MP3 files
 const util = require("util");
+const archiver = require("archiver");
 
 const router = express.Router();
 const audioDirectory = path.join(__dirname, "../audio");
@@ -48,10 +49,11 @@ router.post("/", upload.single("mp3"), (req, res) => {
   });
 });
 
+//UPDATE: Update Audio metadata
 router.put("/:filename/metadata", async (req, res) => {
   const filePath = path.join(audioDirectory, req.params.filename);
   const extname = path.extname(filePath).toLowerCase();
-  const jsonFilePath = `${filePath.replace(extname, "")}.json`;
+  const jsonFilePath = `${filePath}.json`;
 
   fs.readFile(jsonFilePath, "utf8", (err, data) => {
     if (err) {
@@ -65,16 +67,22 @@ router.put("/:filename/metadata", async (req, res) => {
       ...req.body,
       lastModifiedDate: new Date().toISOString(),
     };
+    console.log("Updated Metadata: ", updatedMetadata);
 
     fs.writeFile(jsonFilePath, JSON.stringify(updatedMetadata), (err) => {
       if (err) {
         console.error("Error updating customTags file: ", err);
         return;
       }
+      console.log(
+        `Metadata updated successfully on file: ${filePath}.json \nWith metadata`,
+        updatedMetadata
+      );
 
-      res
-        .status(200)
-        .json({ message: "Metadata updated successfully", updatedMetadata });
+      res.status(200).json({
+        message: `Metadata updated successfully`,
+        updatedMetadata,
+      });
     });
   });
 });
@@ -89,25 +97,18 @@ router.get("/", async (req, res) => {
     const filteredFiles = files.filter(
       (file) => path.extname(file) === ".mp3" || path.extname(file) === ".wav"
     );
-
     // Pair audio files with their respective JSON files
     const filesWithTags = await Promise.all(
       filteredFiles.map(async (file) => {
         const jsonFilePath = path.join(
           audioDirectory,
-          `${path.basename(file, path.extname(file))}.json`
+          `${path.basename(file)}.json`
         );
 
-        let customTags = [];
-        try {
-          // Check if the customTags file exists and if not, create it
-          await fs.promises.access(jsonFilePath, fs.constants.F_OK);
-        } catch (err) {
-          await fs.promises.writeFile(jsonFilePath, `{"customTags": ""}`);
-        }
-
         const data = await fs.promises.readFile(jsonFilePath, "utf8");
-        customTags = JSON.parse(data).customTags || [];
+        console.log(`Reading file ${jsonFilePath}: `, data);
+        customTags = JSON.parse(data).tags || [];
+        console.log(`Custom Tags: `, customTags);
         customTags =
           typeof customTags === "string" || customTags instanceof String
             ? customTags.split(",")
@@ -137,33 +138,19 @@ router.get("/:filename/metadata", async (req, res) => {
   const filePath = path.join(audioDirectory, req.params.filename);
   const extname = path.extname(filePath).toLowerCase();
 
-  const { parseFile } = await import("music-metadata"); // For reading metadata
   try {
-    const metadata = await parseFile(filePath);
-
-    const jsonFilePath = `${filePath.replace(extname, "")}.json`;
-
-    // Check if the customTags file exists and if not, create it
-    try {
-      await fs.promises.access(jsonFilePath, fs.constants.F_OK);
-    } catch (err) {
-      await fs.promises.writeFile(jsonFilePath, `{"tags": ""}`);
-    }
-
-    let customTags = [];
-    try {
-      const data = await fs.promises.readFile(jsonFilePath, "utf8");
-      customTags = JSON.parse(data).tags || [];
-    } catch (err) {
-      console.error("Error reading customTags file: ", err);
-    }
+    const jsonFilePath = `${filePath}.json`;
+    console.log(`Accessing file: ${jsonFilePath}`);
+    const metadata = JSON.parse(
+      await fs.promises.readFile(jsonFilePath, "utf8")
+    );
 
     const result = {
-      title: metadata.common.title || "",
-      artist: metadata.common.artist || "",
-      bpm: metadata.common.bpm || "",
-      duration: metadata.format.duration || 0,
-      tags: customTags || [],
+      title: metadata.title || "",
+      artist: metadata.artist || "",
+      bpm: metadata.bpm || "",
+      duration: metadata.duration || 0,
+      tags: metadata.tags || [],
     };
 
     res.json(result);
@@ -172,54 +159,6 @@ router.get("/:filename/metadata", async (req, res) => {
       .status(500)
       .json({ error: "Unable to read metadata", details: err.message });
   }
-});
-
-router.put("/:filename/metadata", async (req, res) => {
-  const filePath = path.join(audioDirectory, req.params.filename);
-  const extname = path.extname(filePath).toLowerCase();
-  const jsonFilePath = `${filePath.replace(extname, "")}.json`;
-
-  const metadata = req.body;
-
-  const updatedMetadata = {
-    title: metadata.title || "",
-    artist: metadata.artist || "",
-    bpm: metadata.bpm || "",
-    duration: metadata.duration || "",
-    tags: metadata.tags || [],
-  };
-
-  fs.writeFile(jsonFilePath, JSON.stringify(updatedMetadata), (err) => {
-    if (err) {
-      console.error(err);
-      res
-        .status(500)
-        .json({ error: "Unable to edit metadata", details: err.message });
-    } else {
-      if (extname === ".mp3") {
-        const tags = {
-          title: updatedMetadata.title,
-          artist: updatedMetadata.artist,
-          bpm: updatedMetadata.bpm,
-          comment: { text: updatedMetadata.tags.join(", ") },
-        };
-
-        NodeID3.write(tags, filePath, function (err) {
-          if (err) {
-            console.error(err);
-            res.status(500).json({
-              error: "Unable to edit MP3 metadata",
-              details: err.message,
-            });
-          } else {
-            res.json({ message: "Metadata updated successfully" });
-          }
-        });
-      } else {
-        res.json({ message: "Metadata updated successfully" });
-      }
-    }
-  });
 });
 
 // DELETE: Delete an Audio file
@@ -290,32 +229,36 @@ router.delete("/multiple", async (req, res) => {
   res.json({ message: "Files deleted successfully" });
 });
 
+// POST: Download multiple audio files as a zip
 router.post("/download", async (req, res) => {
-  // {
-  //   "filenames": ["file1.mp3", "file2.mp3", "file3.mp3"]
-  // }
-  const { filenames } = req.body;
+  const filenames = req.query.filenames ? req.query.filenames.split(",") : [];
+  console.log(`Filenames received: `, filenames);
+
+  if (filenames.length === 0) {
+    return res.status(400).json({ error: "No filenames provided" });
+  }
 
   const archive = archiver("zip", {
-    zlib: { level: 9 }, // Sets the compression level.
+    zlib: { level: 9 }, // Compression level
   });
 
-  archive.on("error", function (err) {
+  archive.on("error", (err) => {
     res.status(500).send({ error: err.message });
   });
 
-  // Set the archive name
   res.attachment("files.zip");
-
-  // Use the pipe method to send the output to the response
   archive.pipe(res);
 
   for (const filename of filenames) {
     const filePath = path.join(audioDirectory, filename);
-    archive.file(filePath, { name: filename });
+    if (fs.existsSync(filePath)) {
+      archive.file(filePath, { name: filename });
+    } else {
+      console.log(`File not found: ${filename}`);
+    }
   }
 
-  archive.finalize();
+  await archive.finalize();
 });
 
 router.put("/multiple/metadata", async (req, res) => {
