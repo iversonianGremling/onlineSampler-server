@@ -316,34 +316,14 @@ router.put("/multiple/metadata", async (req, res) => {
 });
 
 // CREATE: Upload new Audio files
-router.post("/", upload.array("mp3"), (req, res) => {
-  //   <form action="/upload" method="post" enctype="multipart/form-data">
-  //   <input type="file" name="files" multiple>
-  //   <input type="submit" value="Upload">
-  // </form>
-
-  // Assuming `inputElement` is a file input element that allows multiple files
-  // const files = inputElement.files;
-
-  // const formData = new FormData();
-  // for (let i = 0; i < files.length; i++) {
-  //   formData.append('files', files[i]);
-  // }
-
-  // fetch('/upload', {
-  //   method: 'POST',
-  //   body: formData,
-  // })
-  // .then(response => response.json())
-  // .then(data => console.log(data))
-  // .catch(error => console.error('Error:', error));
-
-  // req.files is array of `files` files
-  // req.body will contain the text fields, if there were any
+router.post("/", upload.array("files", 10), (req, res) => {
+  console.log(req.files); // Log the files received by Multer
+  if (!req.files) {
+    return res.status(400).json({ message: "No files received" });
+  }
 
   const uploadDate = new Date().toISOString();
   const files = req.files.map((file) => {
-    // Create customTags json file for each uploaded file
     const jsonFilePath = `${file.path}.json`;
     const initialData = {
       customTags: [],
